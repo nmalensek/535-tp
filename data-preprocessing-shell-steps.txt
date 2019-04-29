@@ -1,0 +1,18 @@
+import org.apache.spark.SparkContext
+import org.apache.spark.sql.SparkSession
+import spark.implicits._
+import org.apache.spark.SparkConf
+import org.apache.spark.rdd.RDD
+
+val all_data = spark.read.format("csv").option("header","true").load(inputPath)
+
+//run this part in the shell and save the output back out, then load that data on subsequent program runs.
+val relevant_data = all_data.select("FlightDate", "Reporting_Airline", "Origin", "Dest", "ArrDelayMinutes", "CarrierDelay",
+"WeatherDelay", "NASDelay", "SecurityDelay", "LateAircraftDelay", "Cancelled", "CancellationCode")
+
+val relevant_data_cast = relevant_data.withColumn("ArrDelayMinutes",'ArrDelayMinutes cast "float").withColumn("CarrierDelay",'CarrierDelay cast "float")
+.withColumn("WeatherDelay",'WeatherDelay cast "float").withColumn("NASDelay", 'NASDelay cast "float")
+.withColumn("SecurityDelay", 'SecurityDelay cast "float").withColumn("LateAircraftDelay", 'LateAircraftDelay cast "float")
+.withColumn("Cancelled", 'Cancelled cast "float").withColumn("FlightDate", 'FlightDate cast "date")
+
+relevant_data_cast.write.format("parquet").save(outputPath + "parquet-files")
