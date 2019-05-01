@@ -7,6 +7,7 @@ import org.apache.spark.ml.regression.LinearRegression
 import org.apache.spark.ml.regression.LinearRegressionModel
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.sql.DataFrame
 
 object AirlineDelayPredictor {
     def main(args: Array[String]) {
@@ -24,18 +25,20 @@ object AirlineDelayPredictor {
 
         val transformer = new VectorAssembler().setInputCols(Array("FlightDate","AirlineId","OriginId","DestId")).setOutputCol("features")
 
-        case class FlightInput(date: String, origin: String, destination: String, AirlineId: Long, delay: Double)
+        case class FlightInput(date: String, origin: String, destination: String, AirlineId: Long, delay: Double, isDelayed: Double)
         case class ModelResults(prediction: Double, AirlineId: Long, AirlineChanceOfDelay: Double)
 
         val airlineLookup = spark.read.load("/535/tp/airline_codes")
         val airportLookup = spark.read.load("/535/tp/airport_codes")
 
-        val airline1ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
-        val airline2ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
-        val airlineNProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
-        val model1 = LinearRegressionModel.load(savedModelRootPath + "/model1")
-        val model2 = LinearRegressionModel.load(savedModelRootPath + "/model2")
-        val modeln = LinearRegressionModel.load(savedModelRootPath + "/modeln")
+        val airline1ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/delayProbabilityModel1")
+        val airline2ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/delayProbabilityModel2")
+        val airlineNProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/delayProbabilityModeln")
+        val delayAmountModel1 = LinearRegressionModel.load(savedModelRootPath + "/model1")
+        val delayAmountModel2 = LinearRegressionModel.load(savedModelRootPath + "/model2")
+        val delayAmountModeln = LinearRegressionModel.load(savedModelRootPath + "/modeln")
+
+        val nonAirlineDelayModel = LinearRegressionModel.load(savedModelRootPath + "/nonAirlineDelays")
         
         while(true) {
             val input = scala.io.StdIn.readLine("Please enter your desired flight date (YYYY-MM-dd format), origin airport, and destination airport:\n")
@@ -44,8 +47,15 @@ object AirlineDelayPredictor {
 
             val modelInput = transformer.transform(preparedInput)
 
+            //predict the amount of delay
             val model1Prediction = model1.transform(modelInput.where($"AirlineId" === 42949672960L).select("label", "features"))
-            //val airline1DelayProbability = airline1ProbabilityModel.transform(modelInput.where($"AirlineId" === 42949672960L).select("label", "features"))
+            
+            //predict likelihood of delay
+            //val airline1DelayProbability = airline1ProbabilityModel.transform(modelInput.where($"AirlineId" === 42949672960L).withColumnRenamed("label", "Delay")
+            //.withColumn("label", lit(0.0)).select("label", "features"))
+            //airline1ProbabilityModel.transform(airline1DelayProbability)
+
+            //combine delay amount and likelihood results into one dataframe, eventually join all airlines' results and display them to user in order
             val model1Results = ModelResults(model1Prediction.first().getDouble(2), 42949672960L, airline1DelayProbability.first().getDouble(2))
 
             //...do for remaining models...
@@ -60,26 +70,26 @@ object AirlineDelayPredictor {
     def convertInput(input: String, airports: DataFrame, airlines: DataFrame) : DataFrame = {
         val splitInput = input.split(" ")
         val flightInputDF = Seq(
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 42949672960L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 94489280512L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 128849018880L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 309237645312L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 360777252864L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 558345748480L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 695784701952L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 704374636544L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 755914244096L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 790273982464L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 867583393792L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 919123001344L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1022202216448L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1228360646656L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1322849927168L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1434519076864L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1503238553600L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1580547964928L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1649267441664L, 999.99),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1709396983808L, 999.99)
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 42949672960L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 94489280512L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 128849018880L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 309237645312L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 360777252864L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 558345748480L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 695784701952L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 704374636544L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 755914244096L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 790273982464L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 867583393792L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 919123001344L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1022202216448L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1228360646656L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1322849927168L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1434519076864L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1503238553600L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1580547964928L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1649267441664L, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, 1709396983808L, 999.99, 0.0)
         ).toDF
         val castDF = flightInputDF.withColumn("date", 'date cast "date")
         
