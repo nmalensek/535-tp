@@ -3,6 +3,9 @@ import org.apache.spark.sql.SparkSession
 import spark.implicits._
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.functions.monotonicallyIncreasingId
+import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.linalg.Vectors
 
 val all_data = spark.read.format("csv").option("header","true").load(inputPath)
 
@@ -16,3 +19,41 @@ val relevant_data_cast = relevant_data.withColumn("ArrDelayMinutes",'ArrDelayMin
 .withColumn("Cancelled", 'Cancelled cast "float").withColumn("FlightDate", 'FlightDate cast "date")
 
 relevant_data_cast.write.format("parquet").save(outputPath + "parquet-files")
+
+val dates_converted = relevant_data_cast.withColumn("FlightDate", unix_timestamp(relevant_data_cast("FlightDate")))
+
+val remove_delay_nulls = dates_converted.na.fill(0.0, Seq("CarrierDelay","WeatherDelay","NASDelay","SecurityDelay","LateAircraftDelay"))
+
+val aggregated_delays = remove_delay_nulls.withColumn("AirlineDelay", (remove_delay_nulls("CarrierDelay") + remove_delay_nulls("LateAircraftDelay")))
+.withColumn("NonAirlineDelay", (remove_delay_nulls("WeatherDelay") + remove_delay_nulls("NASDelay") + remove_delay_nulls("SecurityDelay")))
+
+val airlines = aggregated_delays.select("Reporting_Airline").distinct
+
+val airlines_table = airlines.withColumn("id", monotonicallyIncreasingId)
+
+airlines_table.write.format("parquet").save("/535/tp/airline_codes")
+
+val airport_origin = aggregated_delays.select("Origin")
+val airport_dest = aggregated_delays.select("Dest")
+
+val airport_codes = airport_origin.union(airport_dest).distinct
+
+val airport_codes_id = airport_codes.withColumn("id", monotonicallyIncreasingId)
+
+val agg_delay_with_origin_airport_codes = aggregated_delays.join(loaded_airport_codes, aggregated_delays("Origin") === loaded_airport_codes("Origin")).select(aggregated_delays("*"), loaded_airport_codes("id")).withColumnRenamed("id", "OriginId")
+val agg_delay_with_destination_airport_codes = agg_delay_with_origin_airport_codes.join(loaded_airport_codes, agg_delay_with_origin_airport_codes("Dest") === loaded_airport_codes("Origin")).select(agg_delay_with_origin_airport_codes("*"), loaded_airport_codes("id")).withColumnRenamed("id", "DestId")
+
+val numerical_dataset = agg_delay_with_destination_airport_codes.join(airlines_table, agg_delay_with_destination_airport_codes("Reporting_Airline") === airlines_table("Reporting_Airline")).select(agg_delay_with_destination_airport_codes("*"), airlines_table("id")).withColumnRenamed("id","AirlineId")
+
+//numerical_dataset.write.format("parquet").save("/535/tp/dataset_numerical_columns.parquet")
+
+val trimmed_ds = numerical_dataset.select("FlightDate","Reporting_Airline","AirlineId","Origin","OriginId","Dest","DestId","AirlineDelay","NonAirlineDelay")
+
+val transformer = new VectorAssembler().setInputCols(Array("FlightDate","AirlineId","OriginId","DestId")).setOutputCol("features")
+
+val trimmed_data_with_features = transformer.transform(trimmed_ds)
+
+trimmed_data_with_features.write.format("parquet").save("/535/tp/data_with_features")
+
+//add boolean column so we can create a model that tries to guess whether the flight'll be delayed
+val with_delay = trimmed_data_with_features.withColumn("isDelayed", isDelayed(trimmed_data_with_features("AirlineDelay"), trimmed_data_with_features("NonAirlineDelay")))

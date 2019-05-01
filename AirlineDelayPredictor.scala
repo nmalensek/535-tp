@@ -31,6 +31,8 @@ object AirlineDelayPredictor {
         val airportLookup = spark.read.load("/535/tp/airport_codes")
 
         val airline1ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
+        val airline2ProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
+        val airlineNProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/airlineModel")
         val model1 = LinearRegressionModel.load(savedModelRootPath + "/model1")
         val model2 = LinearRegressionModel.load(savedModelRootPath + "/model2")
         val modeln = LinearRegressionModel.load(savedModelRootPath + "/modeln")
