@@ -48,9 +48,11 @@ object Predictor {
         val transformer = new VectorAssembler().setInputCols(Array("FlightDate","AirlineId","OriginId","DestId")).setOutputCol("features")
 
         val airlineLookup = spark.read.load("/535/tp/airline_codes")
+        val airlineNames = spark.read.load("/535/tp/airline_names")
         val airportLookup = spark.read.load("/535/tp/airport_codes")
 
         airlineLookup.cache()
+        airlineNames.cache()
         airportLookup.cache()
 
         val unitedDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel42949672960")
@@ -117,8 +119,8 @@ object Predictor {
             skywestResults, frontierResults, mesaResults, envoyResults, hawaiianResults, alaskaResults, virginResults, southwestResults, nonAirlineDelayResults).toDF
 
             val resultsWithAirlines = allResults.join(airlineLookup, allResults("AirlineId") === airlineLookup("id"), "left_outer").select(allResults("*"), airlineLookup("Reporting_Airline"))
-            
-            resultsWithAirlines.withColumnRenamed("prediction", "PredictedDelayAmount").orderBy("PredictedDelayAmount").show(20)
+            val resultsWithNames = resultsWithAirlines.join(airlineNames, resultsWithAirlines("AirlineId") === airlineNames("AirlineId"), "left_outer").select(resultsWithAirlines("*"), airlineNames("AirlineName"))
+            resultsWithNames.withColumnRenamed("prediction", "PredictedDelayAmount").orderBy("PredictedDelayAmount").show(20)
         }
     }
 
