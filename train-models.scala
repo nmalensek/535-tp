@@ -47,6 +47,7 @@ object TrainModels {
 
         var regressionModel = new LinearRegression().setMaxIter(10)
         var probabilityModel = new LinearRegression().setMaxIter(10)
+        var scaler = new StandardScaler().setInputCol("features").setOutputCol("scaledFeatures").setWithStd(true).setWithMean(true)
 
         val nonAirlineDelayTraining = fullDataset.where($"FlightDate" < 1483254000).withColumnRenamed("NonAirlineDelay", "label")
         val allDelay = regressionModel.fit(nonAirlineDelayTraining)
@@ -55,8 +56,14 @@ object TrainModels {
         //for each Airline in airlineIds, filter the data by AirlineId, select the ML input columns, train the model, save the trained model to disk (use its save() method)
         for (airlineId <- airlineArray) {
             val filteredTraining = fullTraining.where($"AirlineId" === airlineId).select("label","features")
+            val scal = scaler.fit(filteredTraining)
+            val scalFeatures = scal.transform(filteredTraining)
+            val scaledTraining = scalFeatures.select("label", "scaledFeatures").withColumnRenamed("scaledFeatures", "features")
 
-            val trainedModel = regressionModel.fit(filteredTraining)
+            val scal = scaler.fit(filteredTraining)
+            val scalFeatures = scal.transform(filteredTraining)
+            val scaledTraining = scalFeatures.select("label", "scaledFeatures").withColumnRenamed("scaledFeatures", "features")
+            val trainedModel = regressionModel.fit(scaledTraining)
 
             trainedModel.save("/project/models/amountModel" + airlineId)
 
