@@ -1,15 +1,15 @@
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
-import spark.implicits._
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.ml.regression.LinearRegression
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.sql.functions.udf
 
 object TrainModels {
     def main(args: Array[String]) {
-        if (args.length != 2) {
+        if (args.length != 3) {
             println("Incorrect number of arguments. Usage:")
             println("<input dir> <output dir> <local | yarn>")
             return
@@ -21,21 +21,22 @@ object TrainModels {
         val specifiedMaster = args(2)
 
         val spark = SparkSession.builder.appName("TeamDenverFlights").master(specifiedMaster).getOrCreate()
+        import spark.implicits._
 
         //hard code paths for now?
         //Remove US and FL airlines because they're not in the testing set, so we shouldn't train them
-        val fullDataset = spark.read.format("parquet").load(inputPath)
+        val fullDataset = spark.read.format("parquet").load(inputPath + "/data_with_features/")
             .where($"Reporting_Airline" =!= "US").where($"Reporting_Airline" =!= "FL").where($"Reporting_Airline" =!= "YX")
             .where($"Reporting_Airline" =!= "OH").where($"Reporting_Airline" =!= "G4")
 
         val with_delay = fullDataset.withColumn("isDelayed", isDelayed(fullDataset("AirlineDelay"), fullDataset("NonAirlineDelay")))
         
-        val airlineIds = spark.read.format("parquet").load(inputPath + "/airlines/")
+        val airlineIds = spark.read.format("parquet").load(inputPath + "/airline_codes/")
         val filteredAirlines = airlineIds.where($"Reporting_Airline" =!= "US").where($"Reporting_Airline" =!= "FL").where($"Reporting_Airline" =!= "YX")
             .where($"Reporting_Airline" =!= "OH").where($"Reporting_Airline" =!= "G4")
         
         val airlineArray = filteredAirlines.select("id").rdd.map(x => x(0)).collect()
-        val airportIds = spark.read.format("parquet").load(inputPath + "/airports/")
+        val airportIds = spark.read.format("parquet").load(inputPath + "/airport_codes/")
 
         //get all flights from 2013-01-01 to 2016-12-31 for training and flights from 2017-01-01 onward for testing.
         val fullTraining = fullDataset.where($"FlightDate" < 1483254000).withColumnRenamed("AirlineDelay", "label")
@@ -44,12 +45,12 @@ object TrainModels {
         val trainProb = with_delay.where($"FlightDate" < 1483254000).withColumnRenamed("isDelayed", "label")
         val testProb = with_delay.where($"FlightDate" < 1483254000).withColumnRenamed("isDelayed", "label")
 
-        var regressionModel = new LinearRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
-        var probabilityModel = new LinearRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
+        var regressionModel = new LinearRegression().setMaxIter(10)
+        var probabilityModel = new LinearRegression().setMaxIter(10)
 
         val nonAirlineDelayTraining = fullDataset.where($"FlightDate" < 1483254000).withColumnRenamed("NonAirlineDelay", "label")
         val allDelay = regressionModel.fit(nonAirlineDelayTraining)
-        allDelay.save("/535/models/nonAirlineDelays")
+        allDelay.save("/project/models/nonAirlineDelays")
 
         //for each Airline in airlineIds, filter the data by AirlineId, select the ML input columns, train the model, save the trained model to disk (use its save() method)
         for (airlineId <- airlineArray) {
@@ -57,13 +58,13 @@ object TrainModels {
 
             val trainedModel = regressionModel.fit(filteredTraining)
 
-            trainedModel.save("/535/models/amountModel" + airlineId)
+            trainedModel.save("/project/models/amountModel" + airlineId)
 
             val filteredProbability = trainProb.where($"AirlineId" === airlineId).select("label","features")
 
             val trainedProbModel = probabilityModel.fit(filteredProbability)
 
-            trainedProbModel.save("/535/models/probabilityModel" + airlineId)
+            trainedProbModel.save("/project/models/probabilityModel" + airlineId)
         }   
     }
 
