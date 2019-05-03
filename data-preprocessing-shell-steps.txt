@@ -56,4 +56,5 @@ val trimmed_data_with_features = transformer.transform(trimmed_ds)
 trimmed_data_with_features.write.format("parquet").save("/535/tp/data_with_features")
 
 //add boolean column so we can create a model that tries to guess whether the flight'll be delayed
+def isDelayed = udf((x: Float, y: Float) => if(x > 0.0 || y > 0.0) 1.0 else 0.0)
 val with_delay = trimmed_data_with_features.withColumn("isDelayed", isDelayed(trimmed_data_with_features("AirlineDelay"), trimmed_data_with_features("NonAirlineDelay")))

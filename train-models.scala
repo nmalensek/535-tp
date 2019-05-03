@@ -23,25 +23,51 @@ object TrainModels {
         val spark = SparkSession.builder.appName("TeamDenverFlights").master(specifiedMaster).getOrCreate()
 
         //hard code paths for now?
+        //Remove US and FL airlines because they're not in the testing set, so we shouldn't train them
         val fullDataset = spark.read.format("parquet").load(inputPath)
+            .where($"Reporting_Airline" =!= "US").where($"Reporting_Airline" =!= "FL").where($"Reporting_Airline" =!= "YX")
+            .where($"Reporting_Airline" =!= "OH").where($"Reporting_Airline" =!= "G4")
+
+        val with_delay = fullDataset.withColumn("isDelayed", isDelayed(fullDataset("AirlineDelay"), fullDataset("NonAirlineDelay")))
+        
         val airlineIds = spark.read.format("parquet").load(inputPath + "/airlines/")
+        val filteredAirlines = airlineIds.where($"Reporting_Airline" =!= "US").where($"Reporting_Airline" =!= "FL").where($"Reporting_Airline" =!= "YX")
+            .where($"Reporting_Airline" =!= "OH").where($"Reporting_Airline" =!= "G4")
+        
+        val airlineArray = filteredAirlines.select("id").rdd.map(x => x(0)).collect()
         val airportIds = spark.read.format("parquet").load(inputPath + "/airports/")
 
         //get all flights from 2013-01-01 to 2016-12-31 for training and flights from 2017-01-01 onward for testing.
-        val fullTraining = fullDataset.where("FlightDate" < 1483254000)
-        val fullTesting = fullDataset.where("FlightDate" >= 1483254000)
+        val fullTraining = fullDataset.where($"FlightDate" < 1483254000).withColumnRenamed("AirlineDelay", "label")
+        val fullTesting = fullDataset.where($"FlightDate" >= 1483254000).withColumnRenamed("AirlineDelay", "label")
+
+        val trainProb = with_delay.where($"FlightDate" < 1483254000).withColumnRenamed("isDelayed", "label")
+        val testProb = with_delay.where($"FlightDate" < 1483254000).withColumnRenamed("isDelayed", "label")
+
+        var regressionModel = new LinearRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
+        var probabilityModel = new LinearRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
+
+        val nonAirlineDelayTraining = fullDataset.where($"FlightDate" < 1483254000).withColumnRenamed("NonAirlineDelay", "label")
+        val allDelay = regressionModel.fit(nonAirlineDelayTraining)
+        allDelay.save("/535/models/nonAirlineDelays")
 
         //for each Airline in airlineIds, filter the data by AirlineId, select the ML input columns, train the model, save the trained model to disk (use its save() method)
-        //{
-        //val filteredTraining = fullTraining.where("AirlineId" == id)
-        //val filteredTesting = fullTesting.where("AirlineId" == id)
-        //
-        //val mlInputTraining = filteredTraining.select("AirlineDelay", "features").withColumnRenamed("AirlineDelay", "label")
-        //val mlInputTesting = filteredTesting.select("AirlineDelay", "features").withColumnRenamed("AirlineDelay", "label")
+        for (airlineId <- airlineArray) {
+            //val filteredTraining = fullTraining.where($"AirlineId" === airlineId).select("label","features")
 
-        //ml model code here
-        //}
+            //val trainedModel = regressionModel.fit(filteredTraining)
+
+            //trainedModel.save("/535/models/amountModel" + airlineId)
+
+            val filteredProbability = trainProb.where($"AirlineId" === airlineId).select("label","features")
+
+            val trainedProbModel = probabilityModel.fit(filteredProbability)
+
+            trainedProbModel.save("/535/models/probabilityModel" + airlineId)
+        }   
     }
+
+    def isDelayed = udf((x: Float, y: Float) => if(x > 0.0 || y > 0.0) 1.0 else 0.0)
 }
 
 //fullDataset example rows
@@ -59,6 +85,22 @@ object TrainModels {
 //|1543302000|               YX|1322849927168|   CMH|326417514496| EWR| 635655159808|         0.0|            0.0|      0.0|            null|[1.543302E9,1.322...|
 //|1543302000|               YX|1322849927168|   EWR|635655159808| PIT|1468878815232|        21.0|            0.0|      0.0|            null|[1.543302E9,1.322...|
 //+----------+-----------------+-------------+------+------------+----+-------------+------------+---------------+---------+----------------+--------------------+
+
+//mlInputTesting example rows
+//+-----+--------------------+                                                    
+//|label|            features|
+//+-----+--------------------+
+//|  0.0|[1.543302E9,1.322...|
+//| 98.0|[1.543302E9,1.322...|
+//|  0.0|[1.543302E9,1.322...|
+//| 35.0|[1.543302E9,1.322...|
+//|  0.0|[1.543302E9,1.322...|
+//| 38.0|[1.543302E9,1.322...|
+//|  0.0|[1.543302E9,1.322...|
+//| 26.0|[1.543302E9,1.322...|
+//|  0.0|[1.543302E9,1.322...|
+//| 21.0|[1.543302E9,1.322...|
+//+-----+--------------------+
 
 // airline lookup table
 //+-----------------+-------------+
