@@ -53,11 +53,11 @@ object TrainModels {
 
         //for each Airline in airlineIds, filter the data by AirlineId, select the ML input columns, train the model, save the trained model to disk (use its save() method)
         for (airlineId <- airlineArray) {
-            //val filteredTraining = fullTraining.where($"AirlineId" === airlineId).select("label","features")
+            val filteredTraining = fullTraining.where($"AirlineId" === airlineId).select("label","features")
 
-            //val trainedModel = regressionModel.fit(filteredTraining)
+            val trainedModel = regressionModel.fit(filteredTraining)
 
-            //trainedModel.save("/535/models/amountModel" + airlineId)
+            trainedModel.save("/535/models/amountModel" + airlineId)
 
             val filteredProbability = trainProb.where($"AirlineId" === airlineId).select("label","features")
 

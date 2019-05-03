@@ -1,6 +1,8 @@
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
-import spark.implicits._
+import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.functions.unix_timestamp
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.ml.regression.LinearRegression
@@ -9,14 +11,7 @@ import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.sql.DataFrame
 
-object AirlineDelayPredictor {
-    def main(args: Array[String]) {
-        if (args.length != 2) {
-            println("Incorrect number of arguments. Usage:")
-            println("<input dir> <output dir> <local | yarn>")
-            return
-        }
-
+object Predictor {
         val ENDEAVOR = 1709396983808L
         val AMERICAN = 128849018880L
         val UNITED = 42949672960L
@@ -32,20 +27,31 @@ object AirlineDelayPredictor {
         val ALASKA = 1434519076864L
         val VIRGIN = 1580547964928L
         val SOUTHWEST = 1649267441664L
+        val NONE = 9999999999999L
 
-        //pre-processed files that contains feature column
-        val savedModelRootPath = args(0)
-        val specifiedMaster = args(1)
-
-        val spark = SparkSession.builder.appName("TeamDenverFlights").master(specifiedMaster).getOrCreate()
-
-        val transformer = new VectorAssembler().setInputCols(Array("FlightDate","AirlineId","OriginId","DestId")).setOutputCol("features")
+        val spark = SparkSession.builder.appName("TeamDenverFlights").master("local").getOrCreate()
+        import spark.implicits._
 
         case class FlightInput(date: String, origin: String, destination: String, AirlineId: Long, delay: Double, isDelayed: Double)
         case class ModelResults(prediction: Double, AirlineId: Long, AirlineChanceOfDelay: Double)
+    
+    def main(args: Array[String]) {
+        if (args.length != 1) {
+            println("Incorrect number of arguments. Usage:")
+            println("<input dir>")
+            return
+        }
+
+        //pre-processed files that contains feature column
+        val savedModelRootPath = args(0)
+
+        val transformer = new VectorAssembler().setInputCols(Array("FlightDate","AirlineId","OriginId","DestId")).setOutputCol("features")
 
         val airlineLookup = spark.read.load("/535/tp/airline_codes")
         val airportLookup = spark.read.load("/535/tp/airport_codes")
+
+        airlineLookup.cache()
+        airportLookup.cache()
 
         val unitedDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel42949672960")
         val spiritDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel94489280512")
@@ -56,7 +62,7 @@ object AirlineDelayPredictor {
         val skywestDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel695784701952")
         val frontierDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel704374636544")
         val mesaDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel755914244096")
-        val envoyDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel867583393792L")
+        val envoyDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel867583393792")
         val hawaiianDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel1022202216448")
         val alaskaDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel1434519076864")
         val virginDelayAmount = LinearRegressionModel.load(savedModelRootPath + "/amountModel1580547964928")
@@ -72,7 +78,7 @@ object AirlineDelayPredictor {
         val skywestProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel695784701952")
         val frontierProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel704374636544")
         val mesaProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel755914244096")
-        val envoyProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel867583393792L")
+        val envoyProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel867583393792")
         val hawaiianProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel1022202216448")
         val alaskaProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel1434519076864")
         val virginProbabilityModel = LinearRegressionModel.load(savedModelRootPath + "/probabilityModel1580547964928")
@@ -84,7 +90,7 @@ object AirlineDelayPredictor {
         
         while(true) {
             val input = scala.io.StdIn.readLine("Please enter your desired flight date (YYYY-MM-dd format), origin airport, and destination airport:\n")
-
+            println("Searching for flights matching the input " + input)
             val preparedInput = convertInput(input, airportLookup, airlineLookup)
 
             val modelInput = transformer.transform(preparedInput)
@@ -97,7 +103,7 @@ object AirlineDelayPredictor {
             val jetBlueResults = giveInputToModel(jetBlueDelayAmount, jetBlueProbabilityModel, JETBLUE, modelInput)
             val deltaResults = giveInputToModel(deltaDelayAmount, deltaProbabilityModel, DELTA, modelInput)
             val skywestResults = giveInputToModel(skywestDelayAmount, skywestProbabilityModel, SKYWEST, modelInput)
-            val frontierResults = giveInputToModel(frontierResults, frontierProbabilityModel, FRONTIER, modelInput)
+            val frontierResults = giveInputToModel(frontierDelayAmount, frontierProbabilityModel, FRONTIER, modelInput)
             val mesaResults = giveInputToModel(mesaDelayAmount, mesaProbabilityModel, MESA, modelInput)
             val envoyResults = giveInputToModel(envoyDelayAmount, envoyProbabilityModel, ENVOY, modelInput)
             val hawaiianResults = giveInputToModel(hawaiianDelayAmount, hawaiianProbabilityModel, HAWAIIAN, modelInput)
@@ -105,10 +111,12 @@ object AirlineDelayPredictor {
             val virginResults = giveInputToModel(virginDelayAmount, virginProbabilityModel, VIRGIN, modelInput)
             val southwestResults = giveInputToModel(southwestDelayAmount, southwestProbabilityModel, SOUTHWEST, modelInput)
 
-            val allResults = Seq(endeavorResults, americanResults, unitedResults, spiritResults, expressResults, jetBlueResults, deltaResults, 
-            skywestResults, frontierResults, mesaResults, envoyResults, hawaiianResults, alaskaResults, virginResults, southwestResults).toDF
+            val nonAirlineDelayResults = giveInputToModel(nonAirlineDelayModel, alaskaProbabilityModel, NONE, modelInput)
 
-            val resultsWithAirlines = allResults.join(airlineLookup, allResults("AirlineId") === airlineLookup("id")).select(allResults("prediction"), airlineLookup("Reporting_Airline"))
+            val allResults = Seq(endeavorResults, americanResults, unitedResults, spiritResults, expressResults, jetBlueResults, deltaResults, 
+            skywestResults, frontierResults, mesaResults, envoyResults, hawaiianResults, alaskaResults, virginResults, southwestResults, nonAirlineDelayResults).toDF
+
+            val resultsWithAirlines = allResults.join(airlineLookup, allResults("AirlineId") === airlineLookup("id"), "left_outer").select(allResults("*"), airlineLookup("Reporting_Airline"))
             
             resultsWithAirlines.withColumnRenamed("prediction", "PredictedDelayAmount").orderBy("PredictedDelayAmount").show(20)
         }
@@ -131,7 +139,8 @@ object AirlineDelayPredictor {
             FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, ALASKA, 999.99, 0.0),
             FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, VIRGIN, 999.99, 0.0),
             FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, SOUTHWEST, 999.99, 0.0),
-            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, ENDEAVOR, 999.99, 0.0)
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, ENDEAVOR, 999.99, 0.0),
+            FlightInput(splitInput(0), splitInput(1).toUpperCase, splitInput(2).toUpperCase, NONE, 999.99, 0.0)
         ).toDF
         val castDF = flightInputDF.withColumn("date", 'date cast "date")
         
@@ -155,7 +164,9 @@ object AirlineDelayPredictor {
                 .withColumn("label", lit(0.0)).select("label", "features")).withColumnRenamed("prediction", "prob_prediction")
 
             //combine delay amount and likelihood results into one dataframe, eventually join all airlines' results and display them to user in order
-            val results = ModelResults(delayPrediction.first().getDouble(2), airline, probabilityPrediction.first().getDouble(2))
+            val delayValue = if (delayPrediction.count > 0) delayPrediction.first().getDouble(2) else 100.0
+            val probValue = if(probabilityPrediction.count > 0) probabilityPrediction.first().getDouble(2) else 100.0
+            val results = ModelResults(delayValue, airline, probValue)
 
             return results
     }
